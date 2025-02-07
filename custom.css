@@ -1,1 +1,213 @@
+// API Endpoints and Authentication
+const GOGURU_API = {
+    baseUrl: 'https://api.goguru.com',
+    version: 'v1',
+    token: null,
 
+    init(config) {
+        this.token = localStorage.getItem('goguru_token');
+        if (config?.baseUrl) this.baseUrl = config.baseUrl;
+        if (config?.version) this.version = config.version;
+    },
+
+    getHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': this.token ? `Bearer ${this.token}` : undefined,
+            'X-GOGURU-VERSION': this.version
+        };
+    },
+
+    async request(endpoint, options = {}) {
+        try {
+            const response = await fetch(`${this.baseUrl}/${endpoint}`, {
+                ...options,
+                headers: {
+                    ...this.getHeaders(),
+                    ...options.headers
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.error('API Request Error:', error);
+            notif('error', {
+                title: 'API Error',
+                description: error.message
+            });
+            throw error;
+        }
+    },
+
+    // Authentication endpoints
+    auth: {
+        async login(credentials) {
+            const response = await this.request('auth/login', {
+                method: 'POST',
+                body: JSON.stringify(credentials)
+            });
+            if (response.token) {
+                localStorage.setItem('goguru_token', response.token);
+                this.token = response.token;
+            }
+            return response;
+        },
+
+        async logout() {
+            await this.request('auth/logout', { method: 'POST' });
+            localStorage.removeItem('goguru_token');
+            this.token = null;
+        },
+
+        async validateToken() {
+            return await this.request('auth/validate');
+        }
+    },
+
+    // Project management endpoints
+    projects: {
+        async getAll() {
+            return await this.request('projects');
+        },
+
+        async get(id) {
+            return await this.request(`projects/${id}`);
+        },
+
+        async create(project) {
+            return await this.request('projects', {
+                method: 'POST',
+                body: JSON.stringify(project)
+            });
+        },
+
+        async update(id, updates) {
+            return await this.request(`projects/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(updates)
+            });
+        },
+
+        async delete(id) {
+            return await this.request(`projects/${id}`, {
+                method: 'DELETE'
+            });
+        }
+    }
+};
+
+// Feature Management System
+const FeatureManager = {
+    features: {},
+    
+    init(config) {
+        this.features = config.features || {};
+        this.setupFeatureToggles();
+    },
+
+    isEnabled(featureName) {
+        return this.features[featureName]?.enabled || false;
+    },
+
+    getFeatureConfig(featureName) {
+        return this.features[featureName]?.config || {};
+    },
+
+    setupFeatureToggles() {
+        Object.entries(this.features).forEach(([name, feature]) => {
+            if (feature.enabled) {
+                this.initializeFeature(name, feature);
+            }
+        });
+    },
+
+    initializeFeature(name, feature) {
+        switch(name) {
+            case 'customTags':
+                this.initializeCustomTags(feature.config);
+                break;
+            case 'advancedNavigation':
+                this.initializeAdvancedNavigation(feature.config);
+                break;
+            case 'analytics':
+                this.initializeAnalytics(feature.config);
+                break;
+            default:
+                console.log(`No initialization needed for feature: ${name}`);
+        }
+    },
+
+    initializeCustomTags(config) {
+        if (!config) return;
+        
+        const container = $('.tags-container');
+        if (!container.length) return;
+
+        config.tags.forEach(tag => {
+            container.append(`
+                <div class="custom-tag" data-tag-id="${tag.id}">
+                    <span class="tag-name">${tag.name}</span>
+                    ${tag.removable ? '<button class="remove-tag">×</button>' : ''}
+                </div>
+            `);
+        });
+
+        // Event listeners for custom tags
+        $('.custom-tag .remove-tag').on('click', function() {
+            const tagId = $(this).closest('.custom-tag').data('tag-id');
+            // Handle tag removal
+            $(this).closest('.custom-tag').remove();
+        });
+    },
+
+    initializeAdvancedNavigation(config) {
+        if (!config) return;
+
+        const navContainer = $('.navigation-container');
+        if (!navContainer.length) return;
+
+        // Setup advanced navigation features
+        if (config.customLinks?.length) {
+            const linksHtml = config.customLinks
+                .map(link => `
+                    <a href="${link.url}" class="nav-link ${link.className || ''}">
+                        ${link.icon ? `<i class="nav-icon">${link.icon}</i>` : ''}
+                        <span class="nav-text">${link.text}</span>
+                    </a>
+                `)
+                .join('');
+            
+            navContainer.append(linksHtml);
+        }
+    },
+
+    initializeAnalytics(config) {
+        if (!config) return;
+
+        // Initialize analytics tracking
+        window.goguruAnalytics = {
+            trackEvent: function(eventName, eventData) {
+                if (!config.enabled) return;
+                
+                const payload = {
+                    event: eventName,
+                    data: eventData,
+                    timestamp: new Date().toISOString(),
+                    sessionId: localStorage.getItem('goguru_session_id')
+                };
+
+                GOGURU_API.request('analytics/events', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                }).catch(error => {
+                    console.error('Analytics Error:', error);
+                });
+            }
+        };
+    }
+};
